@@ -1,0 +1,42 @@
+name: toolpath-audit
+
+services:
+  api:
+    build: .
+    image: toolpath-audit:latest
+    environment:
+      PORT: 8000
+    ports:
+      # Host port is configurable: AUDIT_PORT=9000 docker compose up api
+      - "${AUDIT_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  # One-shot verification: waits for the API to be healthy, then runs the
+  # code tests, the build (byte-compile) step and the API smoke test
+  # (including inch relative moves).  Its exit code reports the result:
+  #   docker compose up --abort-on-container-exit --exit-code-from verify
+  verify:
+    image: toolpath-audit:latest
+    build: .
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://api:8000
+    command:
+      - sh
+      - -c
+      - >-
+        python -m unittest discover -s tests -t . -v &&
+        python -m compileall -q app scripts tests &&
+        python scripts/smoke.py
+    restart: "no"
